@@ -1,0 +1,22 @@
+{
+  "relevance": null,
+  "briefing": null,
+  "key_messages": [],
+  "analysed_at": null,
+  "id": 1,
+  "title": "IPPR Report on Mayors and Fiscal Devolution",
+  "link": "https://files.ippr.org/production/Downloads/Devolution_that_delivers_Sept26.pdf?dm=1790083583",
+  "attachment_name": null,
+  "attachment_url": null,
+  "category": "LGR",
+  "notes": "",
+  "keywords": "Mayors, Fiscal Power",
+  "date_entered": "2026-09-23",
+  "region": "National",
+  "authority": "",
+  "issue_url": "https://github.com/U-PKB/ED-LGR-DB/issues/1",
+  "added_by": "U-PKB",
+  "analysis_status": "failed",
+  "analysis_error": "The Anthropic API key is invalid.",
+  "updated_at": "2026-09-23T17:33:16.888Z"
+}
