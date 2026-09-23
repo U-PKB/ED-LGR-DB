@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ED &amp; LGR Database</title>
+  <meta name="description" content="UNISON database of Local Government Reorganisation and English Devolution articles, with automatic briefings and key messages.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%235b2c86'/%3E%3Cpath d='M9 9h14M9 16h14M9 23h9' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></svg></span>
+        <div>
+          <p class="brand-kicker">UNISON Local Government</p>
+          <h1>English Devolution &amp; LGR Database</h1>
+        </div>
+      </div>
+      <div class="masthead-actions">
+        <a class="btn btn-ghost" href="/api/export.csv" download>Export CSV</a>
+        <button class="btn btn-light" id="add-entry" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>
+          Add entry
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="notice" id="analysis-off" hidden>
+      Automatic analysis is switched off because no Anthropic API key is set on the server. Entries will still be saved; add the key and use <strong>Re-analyse</strong> to produce briefings.
+    </div>
+
+    <section class="stats" aria-label="Summary">
+      <div class="stat"><span class="stat-value" id="stat-total">0</span><span class="stat-label">Entries</span></div>
+      <div class="stat"><span class="stat-value" id="stat-lgr">0</span><span class="stat-label">Local Government Reorganisation</span></div>
+      <div class="stat"><span class="stat-value" id="stat-ed">0</span><span class="stat-label">English Devolution</span></div>
+      <div class="stat stat-accent"><span class="stat-value" id="stat-high">0</span><span class="stat-label">High relevance</span></div>
+    </section>
+
+    <section class="filters" aria-label="Search and filter">
+      <label class="search">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+        <span class="visually-hidden">Search</span>
+        <input type="search" id="filter-search" placeholder="Search titles, notes, keywords, briefings…">
+      </label>
+      <select id="filter-category" aria-label="Category">
+        <option value="">All categories</option>
+      </select>
+      <select id="filter-region" aria-label="UNISON region">
+        <option value="">All regions</option>
+      </select>
+      <select id="filter-relevance" aria-label="Relevance">
+        <option value="">Any relevance</option>
+      </select>
+    </section>
+
+    <section class="results" aria-live="polite">
+      <p class="result-count" id="result-count"></p>
+      <div class="table-wrap">
+        <table class="entries">
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">Date entered</th>
+              <th scope="col">Entry</th>
+              <th scope="col">Category</th>
+              <th scope="col">Region</th>
+              <th scope="col">Council / authority</th>
+              <th scope="col">Relevance</th>
+            </tr>
+          </thead>
+          <tbody id="entries-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="empty-state" hidden>
+        <h2>No entries yet</h2>
+        <p>Add a link, a document or a question to start building the database.</p>
+        <button class="btn btn-primary" type="button" data-action="add">Add the first entry</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Entry detail -->
+  <aside class="drawer" id="detail" aria-hidden="true" aria-labelledby="detail-title">
+    <div class="drawer-scrim" data-action="close-detail"></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true">
+      <header class="drawer-head">
+        <div>
+          <p class="drawer-kicker" id="detail-kicker"></p>
+          <h2 id="detail-title"></h2>
+        </div>
+        <button class="icon-btn" type="button" data-action="close-detail" aria-label="Close">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+        </button>
+      </header>
+      <div class="drawer-body" id="detail-body"></div>
+      <footer class="drawer-foot">
+        <button class="btn btn-danger-ghost" type="button" id="detail-delete">Delete</button>
+        <div class="spacer"></div>
+        <button class="btn btn-secondary" type="button" id="detail-analyse">Re-analyse</button>
+        <button class="btn btn-primary" type="button" id="detail-edit">Edit</button>
+      </footer>
+    </div>
+  </aside>
+
+  <!-- Add / edit form -->
+  <dialog class="modal" id="entry-dialog" aria-labelledby="form-title">
+    <form id="entry-form" method="dialog" novalidate>
+      <header class="modal-head">
+        <h2 id="form-title">Add entry</h2>
+        <button class="icon-btn" type="button" data-action="close-form" aria-label="Close">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>
+        </button>
+      </header>
+
+      <div class="modal-body">
+        <fieldset class="segmented" id="source-type">
+          <legend>What are you adding?</legend>
+          <label><input type="radio" name="source_type" value="link" checked><span>Link</span></label>
+          <label><input type="radio" name="source_type" value="document"><span>Document</span></label>
+          <label><input type="radio" name="source_type" value="question"><span>Question</span></label>
+        </fieldset>
+
+        <div class="field" data-source="link">
+          <label for="f-link">Article link</label>
+          <input type="url" id="f-link" name="link" placeholder="https://…" inputmode="url">
+        </div>
+
+        <div class="field" data-source="document" hidden>
+          <label for="f-attachment">Document attachment</label>
+          <div class="current-file" id="current-file" hidden>
+            <span id="current-file-name"></span>
+            <label class="inline-check"><input type="checkbox" name="remove_attachment" value="true"> Remove</label>
+          </div>
+          <input type="file" id="f-attachment" name="attachment" accept=".pdf,.docx,.txt,.md,.html,.htm,.csv,.rtf">
+          <p class="hint">PDF, Word (.docx) or text files up to 30 MB. PDF and Word documents are read in full for the analysis.</p>
+        </div>
+
+        <div class="field">
+          <label for="f-title"><span data-label-question>Title</span> <span class="optional" data-optional-title>(optional)</span></label>
+          <input type="text" id="f-title" name="title" maxlength="300">
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="f-category">Category</label>
+            <select id="f-category" name="category" required></select>
+          </div>
+          <div class="field">
+            <label for="f-date">Date entered</label>
+            <input type="date" id="f-date" name="date_entered" required>
+          </div>
+          <div class="field">
+            <label for="f-region">UNISON region or National</label>
+            <select id="f-region" name="region" required>
+              <option value="">Select…</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-authority">Council or strategic authority</label>
+            <input type="text" id="f-authority" name="authority" list="authority-list" placeholder="e.g. Greater Manchester Combined Authority">
+            <datalist id="authority-list"></datalist>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="f-keywords">Keywords <span class="optional">(separate with commas)</span></label>
+          <input type="text" id="f-keywords" name="keywords" placeholder="e.g. TUPE, unitary proposal, pay harmonisation">
+          <p class="hint">Leave blank and keywords will be suggested by the analysis.</p>
+        </div>
+
+        <div class="field">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes" name="notes" rows="4"></textarea>
+        </div>
+
+        <label class="inline-check" id="reanalyse-wrap" hidden>
+          <input type="checkbox" name="reanalyse" value="true"> Re-analyse after saving
+        </label>
+
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+      </div>
+
+      <footer class="modal-foot">
+        <p class="hint" id="form-analysis-hint">A briefing and key messages will be written automatically after you save.</p>
+        <div class="spacer"></div>
+        <button class="btn btn-secondary" type="button" data-action="close-form">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="form-submit">Save entry</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
