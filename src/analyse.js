@@ -27,7 +27,9 @@ Return:
 
 let client;
 function getClient() {
-  client ??= new Anthropic();
+  // Tolerate spaces, line breaks or quote marks pasted in with the key.
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim().replace(/^["']|["']$/g, '') || undefined;
+  client ??= new Anthropic({ apiKey });
   return client;
 }
 
@@ -94,7 +96,9 @@ export async function analyseEntry(entry, source) {
 }
 
 export function describeError(err) {
-  if (err instanceof Anthropic.AuthenticationError) return 'The Anthropic API key is invalid.';
+  if (err instanceof Anthropic.AuthenticationError) {
+    return 'Anthropic rejected the API key. Check that the ANTHROPIC_API_KEY secret is an API key from console.anthropic.com (it starts "sk-ant-api") and has not been deleted.';
+  }
   if (err instanceof Anthropic.RateLimitError) return 'Too many requests to the analysis service. Try again shortly.';
   if (err instanceof Anthropic.BadRequestError) {
     return `The analysis request was rejected: ${err.message}`;
