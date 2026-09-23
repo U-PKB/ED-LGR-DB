@@ -2,11 +2,9 @@
   "name": "ed-lgr-db",
   "version": "1.0.0",
   "description": "UNISON database of Local Government Reorganisation and English Devolution articles, with automatic briefings",
-  "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --watch --env-file-if-exists=.env server.js"
+    "build": "node scripts/build-site.js"
   },
   "repository": {
     "type": "git",
@@ -18,14 +16,11 @@
   "bugs": {
     "url": "https://github.com/U-PKB/ED-LGR-DB/issues"
   },
-  "homepage": "https://github.com/U-PKB/ED-LGR-DB#readme",
+  "homepage": "https://u-pkb.github.io/ED-LGR-DB/",
   "type": "module",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
-    "better-sqlite3": "^13.0.3",
-    "express": "^5.2.1",
     "mammoth": "^1.12.3",
-    "multer": "^2.4.0",
     "zod": "^4.6.5"
   },
   "engines": {

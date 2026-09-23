@@ -4,8 +4,6 @@ const state = {
   entries: [],
   options: null,
   selectedId: null,
-  editingId: null,
-  pollTimer: null,
 };
 
 const els = {
@@ -21,9 +19,6 @@ const els = {
   detailKicker: $('#detail-kicker'),
   detailTitle: $('#detail-title'),
   detailBody: $('#detail-body'),
-  dialog: $('#entry-dialog'),
-  form: $('#entry-form'),
-  formError: $('#form-error'),
   toast: $('#toast'),
 };
 
@@ -41,11 +36,6 @@ const formatDate = (iso) => {
 const formatDateTime = (iso) =>
   iso ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
-const todayIso = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
 const hostOf = (url) => {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 };
@@ -55,10 +45,8 @@ const slug = (s) => String(s).toLowerCase().replace(/[^a-z]+/g, '-');
 const entryTitle = (e) =>
   e.title || e.attachment_name || (e.link && hostOf(e.link)) || (e.notes && e.notes.slice(0, 80)) || `Entry ${e.id}`;
 
-const isBusy = (e) => e.analysis_status === 'pending' || e.analysis_status === 'processing';
 
 function relevanceBadge(e) {
-  if (isBusy(e)) return '<span class="badge badge-status">Analysing</span>';
   if (e.analysis_status === 'failed') return '<span class="badge badge-failed">Analysis failed</span>';
   if (e.analysis_status === 'not_configured') return '<span class="badge badge-off">Not analysed</span>';
   if (!e.relevance) return '';
@@ -86,19 +74,19 @@ function toast(message) {
   toast.timer = setTimeout(() => { els.toast.hidden = true; }, 3200);
 }
 
-async function api(path, options = {}) {
-  const res = await fetch(path, options);
-  if (res.status === 204) return null;
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status}).`);
-  return data;
+async function getJson(path) {
+  const res = await fetch(path, { cache: 'no-cache' });
+  if (!res.ok) throw new Error(`Could not load ${path} (${res.status}).`);
+  return res.json();
 }
 
 // ---------- Loading and rendering ----------
 
-async function loadOptions() {
-  state.options = await api('/api/options');
-  const { categories, regions, relevanceLevels, analysisEnabled } = state.options;
+async function loadData() {
+  const [config, entries] = await Promise.all([getJson('config.json'), getJson('entries.json')]);
+  state.options = config;
+  state.entries = entries;
+  const { categories, regions, relevanceLevels, newEntryUrl, repo } = config;
 
   const opts = (pairs) => pairs.map(([v, l]) => `<option value="${escapeHtml(v)}">${escapeHtml(l)}</option>`).join('');
   const categoryPairs = Object.entries(categories).map(([k, v]) => [k, `${k} – ${v}`]);
@@ -106,19 +94,12 @@ async function loadOptions() {
   els.category.insertAdjacentHTML('beforeend', opts(categoryPairs));
   els.region.insertAdjacentHTML('beforeend', opts(regions.map((r) => [r, r])));
   els.relevance.insertAdjacentHTML('beforeend', opts(relevanceLevels.map((r) => [r, r])) + '<option value="__unanalysed">Not yet analysed</option>');
-  $('#f-category').innerHTML = opts(categoryPairs);
-  $('#f-region').insertAdjacentHTML('beforeend', opts(regions.map((r) => [r, r])));
 
-  $('#analysis-off').hidden = analysisEnabled;
-  if (!analysisEnabled) {
-    $('#form-analysis-hint').textContent = 'Automatic analysis is switched off until an API key is set.';
-  }
-}
+  for (const link of [$('#add-entry'), $('#add-first')]) link.href = newEntryUrl || '#';
+  $('#how-to').href = repo ? `https://github.com/${repo}#readme` : '#';
+  $('#updated-at').textContent = `· Last updated ${formatDateTime(config.builtAt)}`;
 
-async function loadEntries() {
-  state.entries = await api('/api/entries');
   render();
-  schedulePoll();
 }
 
 function filteredEntries() {
@@ -147,13 +128,10 @@ function render() {
   $('#stat-ed').textContent = all.filter((e) => e.category === 'ED').length;
   $('#stat-high').textContent = all.filter((e) => e.relevance === 'High').length;
 
-  const authorities = [...new Set(all.map((e) => e.authority).filter(Boolean))].sort();
-  $('#authority-list').innerHTML = authorities.map((a) => `<option value="${escapeHtml(a)}">`).join('');
-
   const rows = filteredEntries();
   els.empty.hidden = all.length > 0;
   els.table.hidden = all.length === 0;
-  els.count.hidden = all.length === 0;
+  els.count.parentElement.hidden = all.length === 0;
   els.count.textContent = rows.length === all.length
     ? `Showing all ${all.length} ${all.length === 1 ? 'entry' : 'entries'}`
     : `Showing ${rows.length} of ${all.length} entries`;
@@ -184,13 +162,10 @@ function render() {
 }
 
 function renderAnalysis(e) {
-  if (isBusy(e)) {
-    return `<div class="analysis"><p class="analysis-pending"><span class="spinner"></span>
-      Reading the ${e.attachment_name ? 'document' : e.link ? 'article' : 'question'} and writing a briefing…</p></div>`;
-  }
   if (e.analysis_status === 'failed' || e.analysis_status === 'not_configured') {
     return `<div class="analysis"><div class="analysis-head"><h3>Briefing</h3></div>
-      <p class="analysis-error">${escapeHtml(e.analysis_error || 'The analysis did not complete.')}</p></div>`;
+      <p class="analysis-error">${escapeHtml(e.analysis_error || 'The analysis did not complete.')}</p>
+      <p class="analysis-note">To try again, add the <strong>reanalyse</strong> label to the entry on GitHub.</p></div>`;
   }
   if (!e.briefing) return '';
 
@@ -222,7 +197,7 @@ function renderDetail() {
     ? `<a href="${escapeHtml(e.link)}" target="_blank" rel="noopener noreferrer">${icons.link}${escapeHtml(e.link)}</a>`
     : '';
   const attachment = e.attachment_name
-    ? `<a href="/api/entries/${e.id}/attachment">${icons.doc}${escapeHtml(e.attachment_name)}</a>`
+    ? `<a href="${escapeHtml(e.attachment_url)}" target="_blank" rel="noopener noreferrer">${icons.doc}${escapeHtml(e.attachment_name)}</a>`
     : '';
 
   els.detailBody.innerHTML = `
@@ -237,18 +212,10 @@ function renderDetail() {
       ${row('Council or strategic authority', escapeHtml(e.authority))}
       ${row('Keywords', e.keywords ? e.keywords.split(',').map((k) => `<span class="chip">${escapeHtml(k.trim())}</span>`).join(' ') : '')}
       ${row('Notes', escapeHtml(e.notes))}
+      ${row('Added by', e.added_by ? escapeHtml(e.added_by) : '')}
     </dl>`;
 
-  $('#detail-analyse').disabled = isBusy(e) || !state.options.analysisEnabled;
-}
-
-// ---------- Polling for analysis results ----------
-
-function schedulePoll() {
-  clearTimeout(state.pollTimer);
-  if (state.entries.some(isBusy)) {
-    state.pollTimer = setTimeout(() => loadEntries().catch(() => schedulePoll()), 3000);
-  }
+  $('#detail-github').href = e.issue_url || '#';
 }
 
 // ---------- Detail drawer ----------
@@ -259,6 +226,8 @@ function openDetail(id) {
   lastFocus = document.activeElement;
   state.selectedId = id;
   renderDetail();
+  if (!state.selectedId) return;
+  history.replaceState(null, '', `#entry-${id}`);
   els.detail.classList.add('open');
   els.detail.setAttribute('aria-hidden', 'false');
   $('.icon-btn', els.detail).focus();
@@ -268,114 +237,48 @@ function closeDetail() {
   state.selectedId = null;
   els.detail.classList.remove('open');
   els.detail.setAttribute('aria-hidden', 'true');
+  history.replaceState(null, '', location.pathname + location.search);
   lastFocus?.focus?.();
 }
 
-// ---------- Add / edit form ----------
+// ---------- CSV export ----------
 
-function setSourceType(type) {
-  els.form.querySelector(`input[name="source_type"][value="${type}"]`).checked = true;
-  els.form.querySelectorAll('[data-source]').forEach((el) => { el.hidden = el.dataset.source !== type; });
-  const isQuestion = type === 'question';
-  $('[data-label-question]').textContent = isQuestion ? 'Question' : 'Title';
-  $('[data-optional-title]').hidden = isQuestion;
-  $('#f-title').placeholder = isQuestion
-    ? 'e.g. What does the unitary proposal mean for staff pensions?'
-    : 'A short title to help find this entry later';
-}
-
-function openForm(entry = null) {
-  state.editingId = entry?.id ?? null;
-  els.form.reset();
-  els.formError.hidden = true;
-  $('#form-title').textContent = entry ? `Edit entry ${entry.id}` : 'Add entry';
-  $('#form-submit').textContent = entry ? 'Save changes' : 'Save entry';
-  $('#reanalyse-wrap').hidden = !entry || !state.options.analysisEnabled;
-
-  const f = els.form.elements;
-  f.title.value = entry?.title ?? '';
-  f.link.value = entry?.link ?? '';
-  f.category.value = entry?.category ?? els.category.value ?? 'LGR';
-  if (!f.category.value) f.category.value = 'LGR';
-  f.date_entered.value = entry?.date_entered ?? todayIso();
-  f.region.value = entry?.region ?? els.region.value ?? '';
-  f.authority.value = entry?.authority ?? '';
-  f.keywords.value = entry?.keywords ?? '';
-  f.notes.value = entry?.notes ?? '';
-
-  $('#current-file').hidden = !entry?.attachment_name;
-  $('#current-file-name').textContent = entry?.attachment_name ?? '';
-
-  setSourceType(entry ? (entry.attachment_name ? 'document' : entry.link ? 'link' : 'question') : 'link');
-  els.dialog.showModal();
-  (entry ? f.title : f.link).focus();
-}
-
-function closeForm() {
-  els.dialog.close();
-}
-
-async function submitForm(event) {
-  event.preventDefault();
-  const f = els.form.elements;
-  const type = f.source_type.value;
-  const editing = state.entries.find((e) => e.id === state.editingId);
-
-  const fd = new FormData();
-  for (const name of ['title', 'category', 'date_entered', 'region', 'authority', 'keywords', 'notes']) {
-    fd.append(name, f[name].value);
-  }
-  fd.append('link', type === 'link' ? f.link.value.trim() : '');
-  const file = f.attachment.files[0];
-  if (type === 'document' && file) fd.append('attachment', file);
-  if (editing?.attachment_name && (type !== 'document' || f.remove_attachment.checked)) {
-    fd.append('remove_attachment', 'true');
-  }
-  if (f.reanalyse.checked) fd.append('reanalyse', 'true');
-
-  // Friendly checks before sending; the server checks again.
-  const problems = [];
-  if (type === 'link' && !f.link.value.trim()) problems.push('Enter the article link.');
-  if (type === 'document' && !file && !(editing?.attachment_name && !f.remove_attachment.checked)) {
-    problems.push('Choose a document to attach.');
-  }
-  if (type === 'question' && !f.title.value.trim()) problems.push('Type the question.');
-  if (!f.region.value) problems.push('Choose a UNISON region or National.');
-  if (problems.length) return showFormError(problems.join(' '));
-
-  const submit = $('#form-submit');
-  submit.disabled = true;
-  try {
-    const saved = await api(editing ? `/api/entries/${editing.id}` : '/api/entries', {
-      method: editing ? 'PUT' : 'POST',
-      body: fd,
-    });
-    closeForm();
-    await loadEntries();
-    toast(editing ? 'Changes saved.' : `Entry ${saved.id} added.${isBusy(saved) ? ' Analysing now…' : ''}`);
-    openDetail(saved.id);
-  } catch (err) {
-    showFormError(err.message);
-  } finally {
-    submit.disabled = false;
-  }
-}
-
-function showFormError(message) {
-  els.formError.textContent = message;
-  els.formError.hidden = false;
-  els.formError.scrollIntoView({ block: 'nearest' });
+function exportCsv() {
+  const columns = [
+    ['ID', (e) => e.id],
+    ['Date entered', (e) => e.date_entered],
+    ['Category', (e) => e.category],
+    ['Title or question', (e) => e.title],
+    ['Link', (e) => e.link],
+    ['Document', (e) => e.attachment_url],
+    ['UNISON region', (e) => e.region],
+    ['Council or strategic authority', (e) => e.authority],
+    ['Keywords', (e) => e.keywords],
+    ['Notes', (e) => e.notes],
+    ['Relevance', (e) => e.relevance],
+    ['Briefing', (e) => e.briefing],
+    ['Key messages', (e) => (e.key_messages || []).map((m) => `• ${m}`).join('\n')],
+    ['GitHub', (e) => e.issue_url],
+  ];
+  const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [columns.map(([h]) => cell(h)).join(',')].concat(
+    filteredEntries().map((e) => columns.map(([, get]) => cell(get(e))).join(',')),
+  );
+  const blob = new Blob(['\uFEFF' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ed-lgr-database-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // ---------- Events ----------
 
 function bindEvents() {
-  $('#add-entry').addEventListener('click', () => openForm());
+  $('#export-csv').addEventListener('click', exportCsv);
   document.addEventListener('click', (event) => {
     const action = event.target.closest('[data-action]')?.dataset.action;
-    if (action === 'add') openForm();
     if (action === 'close-detail') closeDetail();
-    if (action === 'close-form') closeForm();
     if (action === 'copy-briefing') copyBriefing();
   });
 
@@ -395,39 +298,7 @@ function bindEvents() {
     el.addEventListener('input', () => render()));
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && state.selectedId && !els.dialog.open) closeDetail();
-  });
-
-  els.form.addEventListener('submit', submitForm);
-  els.form.querySelectorAll('input[name="source_type"]').forEach((radio) =>
-    radio.addEventListener('change', () => setSourceType(radio.value)));
-
-  $('#detail-edit').addEventListener('click', () => {
-    const e = state.entries.find((x) => x.id === state.selectedId);
-    if (e) openForm(e);
-  });
-
-  $('#detail-analyse').addEventListener('click', async () => {
-    try {
-      await api(`/api/entries/${state.selectedId}/analyse`, { method: 'POST' });
-      await loadEntries();
-      toast('Re-analysing entry…');
-    } catch (err) {
-      toast(err.message);
-    }
-  });
-
-  $('#detail-delete').addEventListener('click', async () => {
-    const id = state.selectedId;
-    if (!confirm(`Delete entry ${id}? This cannot be undone.`)) return;
-    try {
-      await api(`/api/entries/${id}`, { method: 'DELETE' });
-      closeDetail();
-      await loadEntries();
-      toast(`Entry ${id} deleted.`);
-    } catch (err) {
-      toast(err.message);
-    }
+    if (event.key === 'Escape' && state.selectedId) closeDetail();
   });
 }
 
@@ -457,8 +328,14 @@ async function copyBriefing() {
 (async function init() {
   bindEvents();
   try {
-    await loadOptions();
-    await loadEntries();
+    await loadData();
+    // Links such as …/#entry-12 open that entry directly.
+    const openFromHash = () => {
+      const linked = Number(location.hash.match(/^#entry-(\d+)$/)?.[1]);
+      if (linked && linked !== state.selectedId) openDetail(linked);
+    };
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
   } catch (err) {
     els.count.textContent = `Could not load the database: ${err.message}`;
   }

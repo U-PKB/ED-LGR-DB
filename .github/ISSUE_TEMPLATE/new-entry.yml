@@ -1,0 +1,70 @@
+name: Add an entry
+description: Add an article link, a document or a question to the ED & LGR database. A briefing and key messages are written automatically.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use the **title** above for a short title for the article or document, or type your **question** there.
+
+        After you submit, a briefing and key messages are written automatically. This usually takes a minute or two. The entry then appears on the database website.
+  - type: input
+    id: link
+    attributes:
+      label: Article link
+      description: A full web address starting with https://. Leave blank if you are attaching a document or asking a question.
+      placeholder: https://…
+  - type: textarea
+    id: document
+    attributes:
+      label: Document attachment
+      description: Drag a PDF, Word (.docx) or text file into this box. Leave blank if you have given a link or are asking a question.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - LGR – Local Government Reorganisation
+        - ED – English Devolution
+    validations:
+      required: true
+  - type: dropdown
+    id: region
+    attributes:
+      label: UNISON region or National
+      options:
+        - National
+        - Eastern
+        - East Midlands
+        - Greater London
+        - Northern
+        - North West
+        - Northern Ireland
+        - Scotland
+        - South East
+        - South West
+        - Cymru/Wales
+        - West Midlands
+        - Yorkshire & Humberside
+    validations:
+      required: true
+  - type: input
+    id: authority
+    attributes:
+      label: Council or strategic authority
+      placeholder: e.g. Greater Manchester Combined Authority
+  - type: input
+    id: date_entered
+    attributes:
+      label: Date entered
+      description: DD/MM/YYYY. Leave blank to use today's date.
+      placeholder: DD/MM/YYYY
+  - type: input
+    id: keywords
+    attributes:
+      label: Keywords
+      description: Separate with commas. Leave blank and keywords will be suggested by the analysis.
+      placeholder: e.g. TUPE, unitary proposal, pay harmonisation
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes

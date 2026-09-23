@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import mammoth from 'mammoth';
@@ -16,41 +15,17 @@ const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.csv', '.htm', '.html', '.rtf']
  * Returns { kind: 'pdf', data } (base64), { kind: 'text', text }, or
  * { kind: 'none', reason } when nothing could be read.
  */
-export async function loadSource(entry, uploadsDir) {
-  if (entry.attachment_path) {
-    return loadAttachment(path.join(uploadsDir, entry.attachment_path), entry.attachment_name);
-  }
-  if (entry.link) {
-    return fetchLink(entry.link);
-  }
+export async function loadSource(entry) {
+  if (entry.attachment_url) return fetchSource(entry.attachment_url, entry.attachment_name);
+  if (entry.link) return fetchSource(entry.link);
   return { kind: 'none', reason: 'No link or document was supplied.' };
 }
 
-async function loadAttachment(filePath, originalName = '') {
-  const ext = path.extname(originalName || filePath).toLowerCase();
-  try {
-    if (ext === '.pdf') {
-      const buf = await fs.readFile(filePath);
-      return { kind: 'pdf', data: buf.toString('base64') };
-    }
-    if (ext === '.docx') {
-      const { value } = await mammoth.extractRawText({ path: filePath });
-      return textSource(value);
-    }
-    if (TEXT_EXTENSIONS.has(ext)) {
-      const raw = await fs.readFile(filePath, 'utf8');
-      return textSource(ext.startsWith('.htm') ? htmlToText(raw) : raw);
-    }
-    return {
-      kind: 'none',
-      reason: `Documents of type "${ext || 'unknown'}" cannot be read automatically. Upload a PDF, Word (.docx) or text file.`,
-    };
-  } catch (err) {
-    return { kind: 'none', reason: `The attached document could not be read (${err.message}).` };
-  }
-}
-
-export async function fetchLink(url) {
+/**
+ * Downloads a web page or document. `name` is the original file name for
+ * attachments, whose download URLs do not always carry a useful type.
+ */
+export async function fetchSource(url, name = '') {
   let parsed;
   try {
     parsed = new URL(url);
@@ -61,8 +36,9 @@ export async function fetchLink(url) {
     return { kind: 'none', reason: 'Only public http(s) links can be read.' };
   }
 
+  let res;
   try {
-    const res = await fetch(parsed, {
+    res = await fetch(parsed, {
       redirect: 'follow',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: {
@@ -71,22 +47,43 @@ export async function fetchLink(url) {
         'Accept-Language': 'en-GB,en;q=0.9',
       },
     });
-    if (!res.ok) {
-      return { kind: 'none', reason: `The website returned an error (HTTP ${res.status}).` };
-    }
-    const type = (res.headers.get('content-type') || '').toLowerCase();
-    if (type.includes('application/pdf') || parsed.pathname.toLowerCase().endsWith('.pdf')) {
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (buf.length > MAX_PDF_BYTES) {
-        return { kind: 'none', reason: 'The linked PDF is too large to analyse (over 30 MB).' };
-      }
-      return { kind: 'pdf', data: buf.toString('base64') };
-    }
-    const body = await res.text();
-    return textSource(type.includes('html') || /<html/i.test(body) ? htmlToText(body) : body);
   } catch (err) {
     const reason = err.name === 'TimeoutError' ? 'the website took too long to respond' : err.message;
     return { kind: 'none', reason: `The link could not be opened (${reason}).` };
+  }
+  if (!res.ok) {
+    return { kind: 'none', reason: `The website returned an error (HTTP ${res.status}).` };
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
+  const type = (res.headers.get('content-type') || '').toLowerCase();
+  const ext = path.extname(name || parsed.pathname).toLowerCase();
+  return readBuffer(buf, { type, ext });
+}
+
+/** Turns downloaded bytes into something the model can read. */
+export async function readBuffer(buf, { type = '', ext = '' }) {
+  try {
+    if (ext === '.pdf' || type.includes('application/pdf')) {
+      if (buf.length > MAX_PDF_BYTES) {
+        return { kind: 'none', reason: 'The PDF is too large to analyse (over 30 MB).' };
+      }
+      return { kind: 'pdf', data: buf.toString('base64') };
+    }
+    if (ext === '.docx' || type.includes('wordprocessingml')) {
+      const { value } = await mammoth.extractRawText({ buffer: buf });
+      return textSource(value);
+    }
+    if (ext && !TEXT_EXTENSIONS.has(ext) && !type.startsWith('text/')) {
+      return {
+        kind: 'none',
+        reason: `Documents of type "${ext}" cannot be read automatically. Attach a PDF, Word (.docx) or text file.`,
+      };
+    }
+    const body = buf.toString('utf8');
+    return textSource(type.includes('html') || ext.startsWith('.htm') || /<html/i.test(body) ? htmlToText(body) : body);
+  } catch (err) {
+    return { kind: 'none', reason: `The document could not be read (${err.message}).` };
   }
 }
 
@@ -121,7 +118,7 @@ function decodeEntities(text) {
   });
 }
 
-// Stops the server being used to reach machines on its own private network.
+// Stops links being used to reach machines on a private network.
 function isPrivateHost(hostname) {
   const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) return true;

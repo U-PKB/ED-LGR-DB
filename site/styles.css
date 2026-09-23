@@ -322,6 +322,9 @@ input[type="file"]::file-selector-button {
   background: var(--high-bg); color: var(--high); padding: 10px 14px; border-radius: 10px; margin: 8px 0 0;
 }
 
+.site-foot { max-width: 1280px; margin: 0 auto; padding: 8px 24px 40px; color: var(--muted); font-size: 13px; }
+.drawer-foot .hint { margin: 0; }
+
 /* Toast */
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60;
