@@ -106,7 +106,7 @@ export async function processEvent(event, { dataDir, github, analyse = analyseEn
     return 'needs changes';
   }
 
-  let result = { analysis_status: ANALYSIS_STATUS.NOT_CONFIGURED, analysis_error: 'Automatic analysis is switched off because the ANTHROPIC_API_KEY secret is not set.' };
+  let result = { analysis_status: ANALYSIS_STATUS.NOT_CONFIGURED, analysis_error: 'Automatic analysis is switched off because neither the CLAUDE_CODE_OAUTH_TOKEN nor the ANTHROPIC_API_KEY secret is set.' };
   if (analysisEnabled) {
     try {
       const source = await loadSource(entry);

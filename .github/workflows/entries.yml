@@ -31,9 +31,14 @@ jobs:
 
       - run: npm ci
 
+      # Claude Code lets the analysis run on a Claude Pro or Max subscription.
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Analyse entry and update the database
         run: node scripts/process-issue.js
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
           ANALYSIS_EFFORT: ${{ vars.ANALYSIS_EFFORT }}

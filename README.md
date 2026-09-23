@@ -40,14 +40,20 @@ Anyone with a GitHub account can open an issue on a public repository. To stop s
 These steps are done once by the repository owner.
 
 1. **Make the repository public.** Go to **Settings → General → Danger Zone → Change visibility**. GitHub Pages is free for public repositories.
-2. **Add the API key.** Go to **Settings → Secrets and variables → Actions → New repository secret**. Name it `ANTHROPIC_API_KEY` and paste in a key from <https://console.anthropic.com>.
+2. **Connect Claude.** Use one of these:
+   - **A Claude Pro or Max subscription (recommended).** On a computer, install Claude Code from <https://claude.com/claude-code>. Then run `claude setup-token` in a terminal, sign in with your Claude account, and copy the token it shows (it starts `sk-ant-oat`). Go to **Settings → Secrets and variables → Actions → New repository secret**, name it `CLAUDE_CODE_OAUTH_TOKEN` and paste in the token. Analyses count towards your subscription's usage limits and there is nothing extra to pay.
+   - **An Anthropic API key.** Create a secret named `ANTHROPIC_API_KEY` containing a key from <https://console.anthropic.com>. You pay per analysis.
+
+   If both are set, the subscription token is used.
 3. **Turn on the website.** Go to **Settings → Pages** and under **Build and deployment → Source** choose **GitHub Actions**.
 4. **Allow the Actions to save entries.** Go to **Settings → Actions → General → Workflow permissions** and choose **Read and write permissions**.
 5. **Publish the site for the first time.** Go to **Actions → Publish website → Run workflow**.
 
 The Actions run from the repository's **default branch**, which you can set under **Settings → General**. Keep all of the code on that branch.
 
-Without the API key, entries are still saved and shown, marked as not analysed. Once the key is added, put the **reanalyse** label on them.
+Without either secret, entries are still saved and shown, marked as not analysed. Once a secret is added, put the **reanalyse** label on them.
+
+The subscription token lasts about a year. When it expires, the entry's comment says the token was rejected. Run `claude setup-token` again and update the secret.
 
 ### Settings
 
@@ -55,8 +61,8 @@ You can change these optional repository variables under **Settings → Secrets 
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_MODEL` | `claude-opus-5` | Claude model used for analysis |
-| `ANALYSIS_EFFORT` | `high` | `low`, `medium` or `high`. Lower values are faster and cheaper |
+| `ANTHROPIC_MODEL` | `claude-opus-5` with an API key, or your subscription's default model | Claude model used for analysis |
+| `ANALYSIS_EFFORT` | `high` | API key only: `low`, `medium` or `high`. Lower values are faster and cheaper |
 
 ## How the analysis works
 

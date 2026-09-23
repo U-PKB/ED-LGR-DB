@@ -177,7 +177,7 @@ test('without an API key the entry is still saved', async () => {
   const outcome = await processEvent({ action: 'opened', issue: makeIssue() }, { dataDir, github: fakeGithub(), analysisEnabled: false });
   assert.equal(outcome, 'not_configured');
   const saved = JSON.parse(fs.readFileSync(path.join(dataDir, '7.json'), 'utf8'));
-  assert.match(saved.analysis_error, /ANTHROPIC_API_KEY/);
+  assert.match(saved.analysis_error, /CLAUDE_CODE_OAUTH_TOKEN/);
 });
 
 test('the site build combines entries newest first', async () => {
@@ -210,4 +210,44 @@ test('the analysis schema converts to a structured output format', () => {
   const format = betaZodOutputFormat(AnalysisSchema);
   assert.equal(format.type, 'json_schema');
   assert.deepEqual(format.schema.required.sort(), ['briefing', 'key_messages', 'relevance', 'suggested_keywords']);
+});
+
+test('with a subscription token the analysis runs through Claude Code', async (t) => {
+  const { analyseEntry } = await import('../src/analyse.js');
+  const dir = tmp();
+  const fakeCli = path.join(dir, 'claude');
+  // Stands in for the Claude Code CLI: checks the source file is readable, then replies.
+  fs.writeFileSync(
+    fakeCli,
+    `#!/usr/bin/env node
+const fs = require('fs');
+const args = process.argv.slice(2);
+const source = fs.readFileSync('source.txt', 'utf8');
+if (process.env.FAKE_FAIL) {
+  console.log(JSON.stringify({ type: 'result', is_error: true, result: 'Invalid API key · Please run /login' }));
+  process.exit(1);
+}
+console.log(JSON.stringify({
+  type: 'result', is_error: false, result: '',
+  structured_output: { relevance: 'Medium', briefing: 'Read: ' + source, key_messages: [args.includes('--json-schema') ? 'schema' : 'none'], suggested_keywords: [] },
+}));
+`,
+    { mode: 0o755 },
+  );
+  const saved = { ...process.env };
+  t.after(() => { process.env = saved; });
+  Object.assign(process.env, { CLAUDE_CODE_OAUTH_TOKEN: 'test-token', CLAUDE_CLI: fakeCli });
+
+  const entry = { category: 'ED', region: 'National', title: 'Q' };
+  const result = await analyseEntry(entry, { kind: 'text', text: 'Article body' });
+  assert.equal(result.relevance, 'Medium');
+  assert.equal(result.briefing, 'Read: Article body');
+  assert.deepEqual(result.key_messages, ['schema']);
+
+  process.env.FAKE_FAIL = '1';
+  const { describeError } = await import('../src/analyse.js');
+  await assert.rejects(analyseEntry(entry, { kind: 'text', text: 'x' }), (err) => {
+    assert.match(describeError(err), /subscription token/);
+    return true;
+  });
 });

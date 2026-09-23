@@ -1,9 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { execFile } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { CATEGORIES, RELEVANCE_LEVELS } from './constants.js';
 
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5';
+const CLI_TIMEOUT_MS = 10 * 60 * 1000;
 const EFFORT = process.env.ANALYSIS_EFFORT || 'high';
 
 export const AnalysisSchema = z.object({
@@ -33,11 +38,17 @@ function getClient() {
   return client;
 }
 
-export function isAnalysisConfigured() {
-  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+/** A Claude subscription token (from `claude setup-token`) takes priority over an API key. */
+export function usesSubscription() {
+  return Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim());
 }
 
-function describeEntry(entry, source) {
+export function isAnalysisConfigured() {
+  return usesSubscription() || Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+}
+
+/** `sourceFile` is set when the source is saved to a file for Claude Code to read. */
+function describeEntry(entry, source, sourceFile) {
   const lines = [
     `Category: ${entry.category} (${CATEGORIES[entry.category]})`,
     `UNISON region: ${entry.region}`,
@@ -53,6 +64,8 @@ function describeEntry(entry, source) {
     lines.push(
       `\nThe source material could not be read: ${source.reason} Base your analysis on the details above only, and say in the briefing that the source was not read.`,
     );
+  } else if (sourceFile) {
+    lines.push(`\nThe source is in the file ${sourceFile} in the current folder. Read all of it before writing your analysis.`);
   } else if (source.kind === 'text') {
     lines.push(`\nText of the source:\n<source>\n${source.text}\n</source>`);
   } else {
@@ -66,6 +79,10 @@ function describeEntry(entry, source) {
 
 /** Sends one entry to Claude and returns the parsed analysis. */
 export async function analyseEntry(entry, source) {
+  return usesSubscription() ? analyseWithSubscription(entry, source) : analyseWithApiKey(entry, source);
+}
+
+async function analyseWithApiKey(entry, source) {
   const content = [];
   if (source.kind === 'pdf') {
     content.push({
@@ -95,7 +112,83 @@ export async function analyseEntry(entry, source) {
   return response.parsed_output;
 }
 
+/**
+ * Runs the analysis through the Claude Code command line, which signs in with
+ * a Claude Pro or Max subscription token instead of an API key.
+ */
+async function analyseWithSubscription(entry, source) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ed-lgr-'));
+  try {
+    let sourceFile = null;
+    if (source.kind === 'pdf') {
+      sourceFile = 'source.pdf';
+      await fs.writeFile(path.join(dir, sourceFile), Buffer.from(source.data, 'base64'));
+    } else if (source.kind === 'text') {
+      sourceFile = 'source.txt';
+      await fs.writeFile(path.join(dir, sourceFile), source.text);
+    }
+
+    const args = [
+      '-p', describeEntry(entry, source, sourceFile),
+      '--output-format', 'json',
+      '--json-schema', JSON.stringify(z.toJSONSchema(AnalysisSchema)),
+      '--system-prompt', SYSTEM_PROMPT,
+      // Claude may only read the files in this folder.
+      '--tools', 'Read',
+      '--allowedTools', 'Read',
+    ];
+    if (process.env.ANTHROPIC_MODEL) args.push('--model', process.env.ANTHROPIC_MODEL);
+
+    const stdout = await runCli(args, dir);
+    let output;
+    try {
+      output = JSON.parse(stdout);
+    } catch {
+      throw new Error('Claude Code returned an unexpected response.');
+    }
+    if (output.is_error) throw new SubscriptionError(output.result || output.subtype || 'Claude Code reported an error.');
+
+    let analysis = output.structured_output;
+    if (!analysis && typeof output.result === 'string') {
+      const json = output.result.match(/\{[\s\S]*\}/);
+      analysis = json ? JSON.parse(json[0]) : null;
+    }
+    const parsed = AnalysisSchema.safeParse(analysis);
+    if (!parsed.success) throw new Error('The analysis was incomplete. Try re-analysing the entry.');
+    return parsed.data;
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+class SubscriptionError extends Error {}
+
+function runCli(args, cwd) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      process.env.CLAUDE_CLI || 'claude',
+      args,
+      { cwd, timeout: CLI_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024, env: { ...process.env, ANTHROPIC_API_KEY: '' } },
+      (err, stdout, stderr) => {
+        // A failed run can still print a JSON result that explains the error.
+        if (stdout.trim().startsWith('{')) return resolve(stdout);
+        if (err?.code === 'ENOENT') return reject(new Error('Claude Code is not installed on the runner.'));
+        reject(new SubscriptionError((stderr || err?.message || 'Claude Code failed.').trim().slice(0, 500)));
+      },
+    );
+  });
+}
+
 export function describeError(err) {
+  if (err instanceof SubscriptionError) {
+    if (/auth|login|token|401|403|oauth/i.test(err.message)) {
+      return 'Claude rejected the subscription token. Run "claude setup-token" again and update the CLAUDE_CODE_OAUTH_TOKEN secret.';
+    }
+    if (/limit|usage|quota|429/i.test(err.message)) {
+      return 'Your Claude subscription usage limit has been reached. Add the reanalyse label to try again later.';
+    }
+    return `Claude Code reported an error: ${err.message}`;
+  }
   if (err instanceof Anthropic.AuthenticationError) {
     return 'Anthropic rejected the API key. Check that the ANTHROPIC_API_KEY secret is an API key from console.anthropic.com (it starts "sk-ant-api") and has not been deleted.';
   }
